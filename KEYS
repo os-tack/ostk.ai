@@ -1,0 +1,16 @@
+# ostk signing keys
+# All releases are signed by the ostk CI key.
+# The CI key is cross-signed by the root key.
+# Verify with: gpg --verify <release>.asc
+
+# ostk root key (offline, air-gapped)
+# Fingerprint: [TO BE FILLED BY @ostk.ai.prime CEREMONY]
+
+# ostk CI key (used for binary releases)
+# Fingerprint: A7B7385963250149C836389BC78631AA6893C46C
+# Algorithm: ed25519
+# Expires: 2028-03-09
+# Cross-signed by: root key
+
+Import the CI key:
+  curl -fsSL https://ostk.ai/ci.asc | gpg --import
