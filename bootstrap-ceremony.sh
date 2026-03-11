@@ -47,13 +47,16 @@ if gpg --list-keys "${OSTK_EMAIL}" 2>/dev/null | grep -q "${OSTK_EMAIL}"; then
   OSTK_KEY=$(gpg --list-keys --with-colons "${OSTK_EMAIL}" | grep '^fpr' | head -1 | cut -d: -f10)
   echo "   Key already exists: ${OSTK_KEY}"
 else
-  echo "   Generating @ostk.ai key (RSA 4096)..."
+  echo "   Generating @ostk.ai key (ed25519)..."
   gpg --batch --gen-key <<EOF
-Key-Type: RSA
-Key-Length: 4096
-Subkey-Type: RSA
-Subkey-Length: 4096
+Key-Type: eddsa
+Key-Curve: Ed25519
+Key-Usage: sign
+Subkey-Type: ecdh
+Subkey-Curve: Curve25519
+Subkey-Usage: encrypt
 Name-Real: ${OSTK_NAME}
+Name-Comment: root key — minted v1.1, certified by @scott + @haystack.prime
 Name-Email: ${OSTK_EMAIL}
 Expire-Date: 2y
 %no-protection
