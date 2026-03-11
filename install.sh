@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="aetherwing-io/haystack"
+REPO="os-tack/ostk.ai"
 VERSION="${OSTK_VERSION:-latest}"
 
 # Detect platform

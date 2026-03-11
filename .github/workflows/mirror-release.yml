@@ -1,0 +1,53 @@
+name: Mirror release from haystack
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to mirror (e.g. v1.0.2)'
+        required: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release artifacts from haystack
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          TARGETS=(
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "aarch64-unknown-linux-musl"
+            "x86_64-unknown-linux-musl"
+          )
+          mkdir -p dist
+          for TARGET in "${TARGETS[@]}"; do
+            FILE="haystack-${VERSION}-${TARGET}.tar.gz"
+            ASC="${FILE}.asc"
+            BASE="https://github.com/aetherwing-io/haystack/releases/download/${VERSION}"
+            curl -fsSL "${BASE}/${FILE}" -o "dist/${FILE}"
+            curl -fsSL "${BASE}/${ASC}" -o "dist/${ASC}"
+          done
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          gh release create "${VERSION}" dist/* \
+            --title "ostk ${VERSION}" \
+            --notes "your os + tack — ${VERSION}
+
+Install:
+\`\`\`bash
+curl -fsSL https://ostk.ai/install | sh
+\`\`\`
+
+Verify:
+\`\`\`bash
+gpg --verify haystack-${VERSION}-aarch64-apple-darwin.tar.gz.asc
+\`\`\`
+
+See KEYS for signing key fingerprints."
