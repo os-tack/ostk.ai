@@ -4,7 +4,7 @@
 # Verify with: gpg --verify <release>.asc
 
 # ostk root key (offline, air-gapped)
-# Fingerprint: [TO BE FILLED BY @ostk.ai.prime CEREMONY]
+# Fingerprint: 6C31536F3DC1BD4780E87B7780DD42208FE25413
 
 # ostk CI key (used for binary releases)
 # Fingerprint: A7B7385963250149C836389BC78631AA6893C46C
