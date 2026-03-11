@@ -72,14 +72,14 @@ echo ""
 echo "3. Co-signing @ostk.ai key (MINT ceremony)..."
 
 echo "   Signing with @scott (${SCOTT_KEY})..."
-gpg --batch --yes --local-user "${SCOTT_KEY}" --sign-key "${OSTK_KEY}" 2>/dev/null && \
+echo "y" | gpg --no-tty --local-user "${SCOTT_KEY}" --command-fd 0 --sign-key "${OSTK_KEY}" 2>/dev/null && \
   echo "   ✓ @scott certified ${OSTK_KEY}" || \
-  echo "   ⚠ @scott key not available — sign manually: gpg --local-user ${SCOTT_KEY} --sign-key ${OSTK_KEY}"
+  echo "   ⚠ sign manually: gpg --local-user ${SCOTT_KEY} --sign-key ${OSTK_KEY}"
 
 echo "   Signing with @haystack.prime (${KERNEL_KEY})..."
-gpg --batch --yes --local-user "${KERNEL_KEY}" --sign-key "${OSTK_KEY}" 2>/dev/null && \
+echo "y" | gpg --no-tty --local-user "${KERNEL_KEY}" --command-fd 0 --sign-key "${OSTK_KEY}" 2>/dev/null && \
   echo "   ✓ @haystack.prime certified ${OSTK_KEY}" || \
-  echo "   ⚠ kernel key not available — sign manually: gpg --local-user ${KERNEL_KEY} --sign-key ${OSTK_KEY}"
+  echo "   ⚠ sign manually: gpg --local-user ${KERNEL_KEY} --sign-key ${OSTK_KEY}"
 
 echo ""
 echo "   @ostk.ai MINTED: ${OSTK_KEY}"
@@ -149,7 +149,7 @@ git config user.signingkey "${OSTK_KEY}"
 
 # Stage the updated KEYS + prime.asc
 git add KEYS prime.asc
-git commit --amend --gpg-sign --local-user "${OSTK_KEY}" -C HEAD
+git commit --amend -S"${OSTK_KEY}" -C HEAD
 
 SIGNED_SHA=$(git log --oneline -1 | cut -d' ' -f1)
 echo "   ✓ Genesis commit signed: ${SIGNED_SHA}"
