@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="0.1.0"
+OSTK_DIR="${OSTK_DIR:-$HOME/.ostk}"
+KERNEL="haystack"
+
+# ─── helpers ───────────────────────────────────────────────────────
+
+die()  { echo "ostk: $*" >&2; exit 1; }
+info() { echo "ostk: $*"; }
+
+require_kernel() {
+  command -v "$KERNEL" >/dev/null 2>&1 || \
+    die "kernel not found. run: curl -fsSL https://ostk.ai/install | sh"
+}
+
+# ─── commands ──────────────────────────────────────────────────────
+
+cmd_boot() {
+  require_kernel
+  info "booting ostk ${VERSION}"
+
+  mkdir -p "${OSTK_DIR}"
+
+  # Initialize state directory
+  mkdir -p "${OSTK_DIR}/state"
+  mkdir -p "${OSTK_DIR}/log"
+  mkdir -p "${OSTK_DIR}/keys"
+
+  # Record boot event
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "${ts} boot ${VERSION}" >> "${OSTK_DIR}/log/events"
+
+  # Detect GPG identity
+  local gpg_id="anonymous"
+  if command -v gpg >/dev/null 2>&1; then
+    gpg_id=$(gpg --list-keys --with-colons 2>/dev/null \
+      | awk -F: '/^uid:.*:$/{print $10; exit}') || true
+    [ -z "$gpg_id" ] && gpg_id="anonymous"
+  fi
+
+  # Write session state
+  cat > "${OSTK_DIR}/state/session" <<EOF
+version=${VERSION}
+booted=${ts}
+identity=${gpg_id}
+kernel=$(${KERNEL} --version 2>/dev/null || echo "unknown")
+EOF
+
+  # Delegate to kernel boot if it supports it
+  if "$KERNEL" help 2>/dev/null | grep -q "boot"; then
+    "$KERNEL" boot "$@"
+  fi
+
+  info "booted. identity: ${gpg_id}"
+  info "state: ${OSTK_DIR}/state/session"
+}
+
+cmd_compile() {
+  require_kernel
+  info "compiling..."
+
+  [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
+
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "${ts} compile" >> "${OSTK_DIR}/log/events"
+
+  # Delegate to kernel
+  "$KERNEL" compile "$@"
+}
+
+cmd_bench() {
+  require_kernel
+  info "benchmarking..."
+
+  [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
+
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "${ts} bench" >> "${OSTK_DIR}/log/events"
+
+  # Delegate to kernel
+  "$KERNEL" bench "$@"
+}
+
+cmd_status() {
+  if [ -f "${OSTK_DIR}/state/session" ]; then
+    cat "${OSTK_DIR}/state/session"
+  else
+    info "not booted"
+  fi
+}
+
+cmd_version() {
+  echo "ostk ${VERSION}"
+  if command -v "$KERNEL" >/dev/null 2>&1; then
+    echo "kernel: $("$KERNEL" --version 2>/dev/null || echo "unknown")"
+  fi
+}
+
+cmd_help() {
+  cat <<EOF
+ostk ${VERSION} — your os + tack
+
+usage: ostk <command> [args]
+
+commands:
+  boot       Initialize the OS and establish identity
+  compile    Compile and verify state
+  bench      Run benchmarks
+  status     Show current session state
+  version    Print version info
+  help       Show this help
+
+environment:
+  OSTK_DIR   State directory (default: ~/.ostk)
+EOF
+}
+
+# ─── dispatch ──────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  boot)    shift; cmd_boot "$@" ;;
+  compile) shift; cmd_compile "$@" ;;
+  bench)   shift; cmd_bench "$@" ;;
+  status)  shift; cmd_status "$@" ;;
+  version|--version|-v) shift; cmd_version "$@" ;;
+  help|--help|-h)       shift; cmd_help "$@" ;;
+  *) die "unknown command: $1. run 'ostk help'" ;;
+esac

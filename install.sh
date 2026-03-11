@@ -48,4 +48,9 @@ tar -xzf "${tmpdir}/${TARBALL}" -C "${tmpdir}"
 install -m 755 "${tmpdir}/haystack" /usr/local/bin/haystack
 ln -sf /usr/local/bin/haystack /usr/local/bin/hs
 
-echo "ostk: installed. run 'ostk boot' or 'hs boot'"
+# Install ostk CLI
+OSTK_SCRIPT_URL="https://raw.githubusercontent.com/${REPO}/main/ostk"
+curl -fsSL "${OSTK_SCRIPT_URL}" -o "${tmpdir}/ostk"
+install -m 755 "${tmpdir}/ostk" /usr/local/bin/ostk
+
+echo "ostk: installed. run 'ostk boot'"
