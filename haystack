@@ -2,15 +2,169 @@
 set -eu
 
 # haystack — ostk kernel (invisible)
-# Minimal runtime that ostk delegates to silently.
+# Receives negotiated identity from ostk, verifies, replies with binding.
 
 HAYSTACK_VERSION="0.1.0"
+OSTK_DIR="${OSTK_DIR:-$HOME/.ostk}"
+
+# ─── kernel reply protocol ────────────────────────────────────────
+# haystack boot --negotiate <session-file>
+#   reads session → verifies identity → writes reply → exits
+#
+# Reply format (written to $OSTK_DIR/state/kernel):
+#   status=ACK|NACK
+#   kernel=haystack <version>
+#   verified=<what was verified>
+#   bound_at=<timestamp>
+#   nonce=<session nonce>
+
+kernel_negotiate() {
+  session_file="$1"
+
+  [ -f "$session_file" ] || { echo "haystack: no session file" >&2; exit 1; }
+
+  # Parse session
+  s_identity=$(sed -n 's/^identity=//p' "$session_file")
+  s_type=$(sed -n 's/^type=//p' "$session_file")
+  s_tier=$(sed -n 's/^tier=//p' "$session_file")
+  s_sign=$(sed -n 's/^sign=//p' "$session_file")
+
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  nonce=$(dd if=/dev/urandom bs=16 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  status="ACK"
+  verified=""
+
+  # ── verify by sign method ──
+  case "$s_sign" in
+    gpg)
+      # Verify GPG key exists and is not expired
+      if command -v gpg >/dev/null 2>&1; then
+        gpg_status=$(gpg --list-keys --with-colons "$s_identity" 2>/dev/null \
+          | awk -F: '/^pub/{print $2; exit}') || true
+        case "$gpg_status" in
+          u|f) verified="gpg:ultimate" ;;
+          m)   verified="gpg:marginal" ;;
+          *)   verified="gpg:unverified" ;;
+        esac
+      else
+        verified="gpg:unavailable"
+        status="NACK"
+      fi
+      ;;
+
+    ssh:*)
+      # Verify SSH key is reachable
+      ssh_ref=$(echo "$s_sign" | sed 's/^ssh://')
+      if [ -f "$ssh_ref" ]; then
+        # Key file exists — try fingerprint, fallback to path-verified
+        if command -v ssh-keygen >/dev/null 2>&1 && \
+           ssh-keygen -lf "$ssh_ref" >/dev/null 2>&1; then
+          fp=$(ssh-keygen -lf "$ssh_ref" 2>/dev/null | awk '{print $2}')
+          verified="ssh:fingerprint:${fp}"
+        else
+          # File exists but can't fingerprint (agent-managed key or no ssh-keygen)
+          verified="ssh:path-verified:${ssh_ref}"
+        fi
+      elif echo "$ssh_ref" | grep -q "^SHA256:"; then
+        # Fingerprint reference — accept on trust (agent may hold key)
+        verified="ssh:fingerprint:${ssh_ref}"
+      else
+        verified="ssh:not-found"
+        status="NACK"
+      fi
+      ;;
+
+    env)
+      # Environment variable — no crypto to verify
+      verified="env:name-only"
+      ;;
+
+    none)
+      # Anonymous — nothing to verify
+      verified="none"
+      ;;
+
+    *)
+      verified="unknown"
+      status="NACK"
+      ;;
+  esac
+
+  # ── write kernel reply ──
+  mkdir -p "${OSTK_DIR}/state"
+  cat > "${OSTK_DIR}/state/kernel" <<EOF
+status=${status}
+kernel=haystack ${HAYSTACK_VERSION}
+identity=${s_identity}
+type=${s_type}
+tier=${s_tier}
+verified=${verified}
+bound_at=${ts}
+nonce=${nonce}
+EOF
+
+  # Log the reply
+  echo "${ts} kernel:reply status=${status} verified=${verified} nonce=${nonce}" \
+    >> "${OSTK_DIR}/log/events"
+
+  # Return status to caller
+  if [ "$status" = "ACK" ]; then
+    exit 0
+  else
+    exit 1
+  fi
+}
+
+# ─── compile ──────────────────────────────────────────────────────
+
+kernel_compile() {
+  # Verify kernel binding exists
+  if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
+    echo "haystack: no kernel binding. negotiate first." >&2
+    exit 1
+  fi
+
+  k_status=$(sed -n 's/^status=//p' "${OSTK_DIR}/state/kernel")
+  if [ "$k_status" != "ACK" ]; then
+    echo "haystack: kernel NACK. cannot compile." >&2
+    exit 1
+  fi
+
+  exit 0
+}
+
+# ─── bench ────────────────────────────────────────────────────────
+
+kernel_bench() {
+  if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
+    echo "haystack: no kernel binding." >&2
+    exit 1
+  fi
+
+  k_status=$(sed -n 's/^status=//p' "${OSTK_DIR}/state/kernel")
+  if [ "$k_status" != "ACK" ]; then
+    echo "haystack: kernel NACK." >&2
+    exit 1
+  fi
+
+  exit 0
+}
+
+# ─── dispatch ─────────────────────────────────────────────────────
 
 case "${1:---version}" in
   --version) echo "haystack ${HAYSTACK_VERSION}" ;;
-  boot)      shift; exit 0 ;;
-  compile)   shift; exit 0 ;;
-  bench)     shift; exit 0 ;;
-  help)      echo "boot compile bench" ;;
-  *)         exit 1 ;;
+  boot)
+    shift
+    if [ "${1:-}" = "--negotiate" ]; then
+      shift
+      kernel_negotiate "${1:-${OSTK_DIR}/state/session}"
+    else
+      exit 0
+    fi
+    ;;
+  compile) shift; kernel_compile "$@" ;;
+  bench)   shift; kernel_bench "$@" ;;
+  help)    echo "boot compile bench" ;;
+  *)       exit 1 ;;
 esac

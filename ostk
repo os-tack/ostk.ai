@@ -145,13 +145,35 @@ EOF
   echo "${ts} negotiate tier=${entity_tier} type=${entity_type} sign=${sign_method}" \
     >> "${OSTK_DIR}/log/events"
 
-  # Delegate to kernel boot if it supports it
-  if "$KERNEL" help 2>/dev/null | grep -q "boot"; then
-    "$KERNEL" boot "$@"
+  # Negotiate with kernel — send session, receive reply
+  kernel_status="no-kernel"
+  kernel_verified=""
+  if "$KERNEL" boot --negotiate "${OSTK_DIR}/state/session" 2>/dev/null; then
+    kernel_status="ACK"
+    if [ -f "${OSTK_DIR}/state/kernel" ]; then
+      kernel_verified=$(sed -n 's/^verified=//p' "${OSTK_DIR}/state/kernel")
+      kernel_nonce=$(sed -n 's/^nonce=//p' "${OSTK_DIR}/state/kernel")
+
+      # Append kernel binding to session
+      cat >> "${OSTK_DIR}/state/session" <<EOF
+kernel_status=${kernel_status}
+kernel_verified=${kernel_verified}
+kernel_nonce=${kernel_nonce}
+bound=true
+EOF
+    fi
+  else
+    kernel_status="NACK"
+    echo "kernel_status=${kernel_status}" >> "${OSTK_DIR}/state/session"
+    echo "bound=false" >> "${OSTK_DIR}/state/session"
   fi
+
+  echo "${ts} kernel:bind status=${kernel_status} verified=${kernel_verified:-none}" \
+    >> "${OSTK_DIR}/log/events"
 
   info "identity: ${entity_id}"
   info "type: ${entity_type} | tier: ${entity_tier} | sign: ${sign_method}"
+  info "kernel: ${kernel_status} | verified: ${kernel_verified:-none}"
   info "state: ${OSTK_DIR}/state/session"
 }
 
