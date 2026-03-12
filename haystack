@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+set -eu
+
+# haystack — ostk kernel (invisible)
+# Minimal runtime that ostk delegates to silently.
+
+HAYSTACK_VERSION="0.1.0"
+
+case "${1:---version}" in
+  --version) echo "haystack ${HAYSTACK_VERSION}" ;;
+  boot)      shift; exit 0 ;;
+  compile)   shift; exit 0 ;;
+  bench)     shift; exit 0 ;;
+  help)      echo "boot compile bench" ;;
+  *)         exit 1 ;;
+esac
