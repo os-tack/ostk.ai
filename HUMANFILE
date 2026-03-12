@@ -1,4 +1,8 @@
-# HUMANFILE — ostk trust & negotiation protocol
+# HUMANFILE — superseded by ENTITYFILE
+
+> This file is kept for lineage. The active trust protocol is in ENTITYFILE.
+> ENTITYFILE extends the entity model to all actor types (human, kernel, agent, CI)
+> while preserving the same trust tiers and governance binding.
 
 ## @whoami
 

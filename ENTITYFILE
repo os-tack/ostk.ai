@@ -1,0 +1,117 @@
+# ENTITYFILE — ostk entity model & trust protocol
+
+## Entities
+
+An entity is anything that can act on the OS: human, kernel, agent, or CI.
+Identity is proven by what you can sign, not what you claim.
+
+### Entity types
+
+| Type   | Example            | Signs with | Persists across sessions |
+|--------|--------------------|------------|--------------------------|
+| Human  | @scott             | GPG        | yes                      |
+| Kernel | @haystack.prime    | GPG        | yes                      |
+| OS     | @ostk.ai.prime     | GPG        | yes                      |
+| Agent  | Claude (this session) | SSH     | no                       |
+| CI     | GitHub Actions     | GPG (CI key) | no                     |
+
+### Identity resolution
+
+At boot, the kernel resolves identity in order:
+
+1. GPG keyring — `gpg --list-keys` first uid
+2. SSH signing key — `git config user.signingkey` if no GPG
+3. Environment — `$OSTK_ENTITY` override (T2 max)
+4. Anonymous — no verifiable identity
+
+```
+identity = gpg_uid || ssh_key_fingerprint || $OSTK_ENTITY || "anonymous"
+```
+
+## Trust tiers
+
+| Tier | Name          | Proof required                     | Write | Negotiate | Govern |
+|------|---------------|------------------------------------|-------|-----------|--------|
+| T0   | Ratified      | GPG key co-signed by existing T0   | yes   | yes       | yes    |
+| T1   | Authenticated | GPG or SSH key, linked to GitHub   | yes   | yes       | no     |
+| T2   | Aliased       | Named entity, no cryptographic proof | no  | read-only | no     |
+| T3   | Anonymous     | No verifiable identity             | no    | no        | no     |
+
+### Tier mapping
+
+| Entity              | Signing method       | Tier |
+|---------------------|----------------------|------|
+| @scott (955AF54E)   | GPG, co-signed root  | T0   |
+| @haystack.prime     | GPG, co-signed root  | T0   |
+| @ostk.ai.prime      | GPG, root key        | T0   |
+| Claude agent (SSH)  | SSH, Anthropic key   | T1   |
+| CI signing key      | GPG, cross-signed    | T1   |
+| Named alias         | none                 | T2   |
+| Anonymous           | none                 | T3   |
+
+## Negotiation protocol
+
+Negotiation establishes tier at boot. One pass, no mid-session elevation.
+
+```
+boot → identify → verify → bind
+```
+
+1. **Boot** — `ostk boot` reads keyring and signing config
+2. **Identify** — resolve entity via identity resolution order
+3. **Verify** — check signing chain: GPG co-signatures or SSH key fingerprint
+4. **Bind** — write tier to `$OSTK_DIR/state/session`; write path enforces it
+
+### Elevation paths
+
+| From | To | Action required                                    |
+|------|----|----------------------------------------------------|
+| T3   | T2 | Set `$OSTK_ENTITY` or register alias               |
+| T3   | T1 | Add GPG or SSH signing key, link to GitHub          |
+| T1   | T0 | Existing T0 holder co-signs your GPG key            |
+
+Downgrade: revoke key, boot without keyring, or unset signing config.
+
+### Constraints
+
+- Tier is immutable within a session
+- Write path checks tier before every mutation
+- T2/T3 cannot modify state, logs, or governance files
+- T1 can write code and state; cannot amend governance
+- Negotiation is local — no network calls for tier resolution
+
+## Agent protocol
+
+Agents (Claude, Copilot, any ephemeral AI session) operate under these rules:
+
+- Agents are **T1 max** — they can write code, not governance
+- Agent work lands on feature branches, never main
+- Merge to main requires T0 signature
+- Agent identity is the signing key fingerprint, not a name
+- Agents do not persist state across sessions — ephemeral by design
+
+## Key chain
+
+| Identity            | Fingerprint / Key                        | Type   | Tier |
+|---------------------|------------------------------------------|--------|------|
+| @scott              | 955AF54E                                 | Human  | T0   |
+| @haystack.prime     | 99B076C9AE6B889A2B7CD88B42E499C6D4889BFC | Kernel | T0   |
+| @ostk.ai.prime      | 6C31536F3DC1BD4780E87B7780DD42208FE25413 | OS     | T0   |
+| CI signing key      | A7B7385963250149C836389BC78631AA6893C46C | CI     | T1   |
+| Claude (this session) | SSH: commit_signing_key.pub            | Agent  | T1   |
+
+## Governance binding
+
+ENTITYFILE is enforced by the kernel at the write path.
+Changes to ENTITYFILE require T0 authority and a signed commit.
+
+The five laws (from GENESIS.md) are architectural:
+1. Write path is invisible
+2. Agents are ephemeral
+3. Coordination through filesystem
+4. Optimistic concurrency
+5. Microkernel — primitives, not intelligence
+
+HUMANFILE is superseded by ENTITYFILE. The trust model is the same.
+The entity model is broader: it recognizes that not all actors are human,
+and not all signing is GPG.
