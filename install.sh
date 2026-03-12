@@ -54,7 +54,7 @@ ln -sf /usr/local/bin/haystack /usr/local/bin/hs
 OSTK_SCRIPT_URL="https://raw.githubusercontent.com/${REPO}/${VERSION}/ostk"
 curl -fsSL "${OSTK_SCRIPT_URL}" -o "${tmpdir}/ostk"
 # Verify the script is a valid bash script before installing
-head -1 "${tmpdir}/ostk" | grep -q '^#!/usr/bin/env bash' || {
+head -1 "${tmpdir}/ostk" | grep -q '^#!/usr/bin/env sh' || {
   echo "ostk: ERROR — downloaded ostk CLI is not a valid script, aborting"
   exit 1
 }

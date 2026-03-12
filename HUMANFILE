@@ -1,0 +1,64 @@
+# HUMANFILE — ostk trust & negotiation protocol
+
+## @whoami
+
+Session identity is determined at boot by GPG keyring state.
+The kernel reads identity from `$OSTK_DIR/state/session`.
+
+| Field     | Source                        |
+|-----------|-------------------------------|
+| identity  | `gpg --list-keys` first uid   |
+| tier      | Derived from identity + sigs  |
+| kernel    | haystack version at boot time |
+
+## Trust tiers
+
+| Tier | Name          | Identity requirement               | Write | Negotiate | Govern |
+|------|---------------|-------------------------------------|-------|-----------|--------|
+| T0   | Ratified      | GPG key co-signed by existing T0    | yes   | yes       | yes    |
+| T1   | Authenticated | GitHub account + verified GPG       | yes   | yes       | no     |
+| T2   | Aliased       | Kernel alias, no GPG                | no    | read-only | no     |
+| T3   | Anonymous     | No verifiable identity              | no    | no        | no     |
+
+## Negotiation protocol
+
+Negotiation is the process by which a session establishes its trust tier.
+
+1. **Boot** — `ostk boot` reads GPG keyring, writes session state
+2. **Identify** — kernel resolves uid to a known signing chain
+3. **Verify** — if uid traces to a T0 co-signer, tier elevates
+4. **Bind** — session state records tier; write path enforces it
+
+### Tier elevation
+
+- T3 → T1: Add a GPG key to the machine, link to GitHub
+- T1 → T0: Existing T0 holder co-signs your key (`gpg --sign-key`)
+- Downgrade: Revoke key or boot without keyring
+
+### Protocol constraints
+
+- Tier is set at boot. No mid-session elevation.
+- Write path checks tier before every mutation.
+- T2/T3 cannot modify state, logs, or governance files.
+- Negotiation is local — no network calls for tier resolution.
+
+## Governance binding
+
+HUMANFILE is enforced by the kernel at the write path.
+Changes to HUMANFILE require T0 authority and a signed commit.
+
+The five laws (from GENESIS.md) are architectural:
+1. Write path is invisible
+2. Agents are ephemeral
+3. Coordination through filesystem
+4. Optimistic concurrency
+5. Microkernel — primitives, not intelligence
+
+## Key chain
+
+| Identity          | Fingerprint                              | Role       |
+|-------------------|------------------------------------------|------------|
+| @scott            | 955AF54E                                 | Human, T0  |
+| @haystack.prime   | 99B076C9AE6B889A2B7CD88B42E499C6D4889BFC | Kernel, T0 |
+| @ostk.ai.prime    | 6C31536F3DC1BD4780E87B7780DD42208FE25413 | OS root    |
+| CI signing key    | A7B7385963250149C836389BC78631AA6893C46C | Releases   |
