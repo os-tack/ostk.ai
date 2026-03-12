@@ -4,6 +4,7 @@ set -eu
 VERSION="0.1.0"
 OSTK_DIR="${OSTK_DIR:-$HOME/.ostk}"
 KERNEL="haystack"
+HAYSTACK_DIR="${HAYSTACK_DIR:-.haystack}"
 
 # ─── helpers ───────────────────────────────────────────────────────
 
@@ -17,6 +18,42 @@ require_kernel() {
 
 require_boot() {
   [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
+}
+
+# ─── socket IPC ───────────────────────────────────────────────────
+
+kernel_alive() {
+  [ -p "${HAYSTACK_DIR}/sock" ] && [ -p "${HAYSTACK_DIR}/reply" ] && \
+    [ -f "${HAYSTACK_DIR}/pid" ] && kill -0 "$(cat "${HAYSTACK_DIR}/pid")" 2>/dev/null
+}
+
+kernel_send() {
+  # Send command via socket, read response. Returns status code.
+  # Usage: kernel_send "compile" → prints payload, returns exit code
+  cmd="$1"
+  echo "$cmd" > "${HAYSTACK_DIR}/sock"
+
+  # Read response
+  response=""
+  status_code=1
+  while IFS= read -r line; do
+    case "$line" in
+      "STATUS "*)
+        status_code=$(echo "$line" | cut -d' ' -f2)
+        ;;
+      "END")
+        break
+        ;;
+      *)
+        [ -n "$response" ] && response="${response}
+"
+        response="${response}${line}"
+        ;;
+    esac
+  done < "${HAYSTACK_DIR}/reply"
+
+  [ -n "$response" ] && echo "$response"
+  return "$status_code"
 }
 
 # ─── identity resolution ──────────────────────────────────────────
@@ -145,6 +182,12 @@ EOF
   echo "${ts} negotiate tier=${entity_tier} type=${entity_type} sign=${sign_method}" \
     >> "${OSTK_DIR}/log/events"
 
+  # Start kernel listener if not already running
+  if ! kernel_alive; then
+    "$KERNEL" listen &
+    info "kernel listener: pid $!"
+  fi
+
   # Negotiate with kernel — send session, receive reply
   kernel_status="no-kernel"
   kernel_verified=""
@@ -203,7 +246,12 @@ cmd_compile() {
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${ts} compile" >> "${OSTK_DIR}/log/events"
 
-  "$KERNEL" compile "$@"
+  if kernel_alive; then
+    info "via socket: ${HAYSTACK_DIR}/sock"
+    kernel_send "compile $*" || die "compile failed (kernel)"
+  else
+    "$KERNEL" compile "$@"
+  fi
 }
 
 cmd_bench() {
@@ -215,7 +263,12 @@ cmd_bench() {
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${ts} bench" >> "${OSTK_DIR}/log/events"
 
-  "$KERNEL" bench "$@"
+  if kernel_alive; then
+    info "via socket: ${HAYSTACK_DIR}/sock"
+    kernel_send "bench $*" || die "bench failed (kernel)"
+  else
+    "$KERNEL" bench "$@"
+  fi
 }
 
 cmd_status() {

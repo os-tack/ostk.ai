@@ -100,6 +100,65 @@ Agents (Claude, Copilot, any ephemeral AI session) operate under these rules:
 | CI signing key      | A7B7385963250149C836389BC78631AA6893C46C | CI     | T1   |
 | Claude (this session) | SSH: commit_signing_key.pub            | Agent  | T1   |
 
+## Kernel socket protocol
+
+The kernel exposes a FIFO-based IPC channel at `.haystack/`.
+
+### Runtime directory
+
+```
+.haystack/
+├── sock         FIFO — request pipe (ostk writes, haystack reads)
+├── reply        FIFO — response pipe (haystack writes, ostk reads)
+├── pid          daemon PID file
+└── compile.d/   compile pipeline stages (executable scripts)
+```
+
+### Wire format
+
+Request: single line written to `sock`
+```
+<command> [args...]
+```
+
+Response: multi-line read from `reply`
+```
+STATUS <exit-code>
+<payload lines>
+END
+```
+
+### Commands
+
+| Command   | Description                          | Requires |
+|-----------|--------------------------------------|----------|
+| compile   | Run compile.d pipeline               | ACK      |
+| bench     | Run benchmarks                       | ACK      |
+| status    | Return kernel state                  | —        |
+| shutdown  | Stop listener, remove PID            | —        |
+
+### Lifecycle
+
+1. `ostk boot` calls `haystack listen &` — daemon starts, writes PID
+2. `ostk compile` checks `kernel_alive()` — if daemon is up, sends via sock
+3. If no daemon, falls back to direct `haystack compile` (fork per call)
+4. `ostk boot` (re-boot) replaces the daemon
+
+### compile.d pipeline
+
+Drop executable scripts into `.haystack/compile.d/`. They run in lexical
+order during compile. Each stage receives no arguments; exit non-zero to
+abort the pipeline.
+
+```
+.haystack/compile.d/
+├── 00-lint.sh
+├── 10-typecheck.sh
+└── 20-test.sh
+```
+
+Stages are kernel-internal. ostk does not know or care what they do.
+
 ## Governance binding
 
 ENTITYFILE is enforced by the kernel at the write path.

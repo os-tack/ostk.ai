@@ -1,1 +1,4 @@
 lift-keys-to-bw.sh
+.haystack/sock
+.haystack/reply
+.haystack/pid

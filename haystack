@@ -3,20 +3,13 @@ set -eu
 
 # haystack — ostk kernel (invisible)
 # Receives negotiated identity from ostk, verifies, replies with binding.
+# Listens on .haystack/sock for IPC when running as daemon.
 
 HAYSTACK_VERSION="0.1.0"
 OSTK_DIR="${OSTK_DIR:-$HOME/.ostk}"
+HAYSTACK_DIR="${HAYSTACK_DIR:-.haystack}"
 
 # ─── kernel reply protocol ────────────────────────────────────────
-# haystack boot --negotiate <session-file>
-#   reads session → verifies identity → writes reply → exits
-#
-# Reply format (written to $OSTK_DIR/state/kernel):
-#   status=ACK|NACK
-#   kernel=haystack <version>
-#   verified=<what was verified>
-#   bound_at=<timestamp>
-#   nonce=<session nonce>
 
 kernel_negotiate() {
   session_file="$1"
@@ -37,7 +30,6 @@ kernel_negotiate() {
   # ── verify by sign method ──
   case "$s_sign" in
     gpg)
-      # Verify GPG key exists and is not expired
       if command -v gpg >/dev/null 2>&1; then
         gpg_status=$(gpg --list-keys --with-colons "$s_identity" 2>/dev/null \
           | awk -F: '/^pub/{print $2; exit}') || true
@@ -53,20 +45,16 @@ kernel_negotiate() {
       ;;
 
     ssh:*)
-      # Verify SSH key is reachable
       ssh_ref=$(echo "$s_sign" | sed 's/^ssh://')
       if [ -f "$ssh_ref" ]; then
-        # Key file exists — try fingerprint, fallback to path-verified
         if command -v ssh-keygen >/dev/null 2>&1 && \
            ssh-keygen -lf "$ssh_ref" >/dev/null 2>&1; then
           fp=$(ssh-keygen -lf "$ssh_ref" 2>/dev/null | awk '{print $2}')
           verified="ssh:fingerprint:${fp}"
         else
-          # File exists but can't fingerprint (agent-managed key or no ssh-keygen)
           verified="ssh:path-verified:${ssh_ref}"
         fi
       elif echo "$ssh_ref" | grep -q "^SHA256:"; then
-        # Fingerprint reference — accept on trust (agent may hold key)
         verified="ssh:fingerprint:${ssh_ref}"
       else
         verified="ssh:not-found"
@@ -74,20 +62,9 @@ kernel_negotiate() {
       fi
       ;;
 
-    env)
-      # Environment variable — no crypto to verify
-      verified="env:name-only"
-      ;;
-
-    none)
-      # Anonymous — nothing to verify
-      verified="none"
-      ;;
-
-    *)
-      verified="unknown"
-      status="NACK"
-      ;;
+    env)  verified="env:name-only" ;;
+    none) verified="none" ;;
+    *)    verified="unknown"; status="NACK" ;;
   esac
 
   # ── write kernel reply ──
@@ -103,11 +80,9 @@ bound_at=${ts}
 nonce=${nonce}
 EOF
 
-  # Log the reply
   echo "${ts} kernel:reply status=${status} verified=${verified} nonce=${nonce}" \
     >> "${OSTK_DIR}/log/events"
 
-  # Return status to caller
   if [ "$status" = "ACK" ]; then
     exit 0
   else
@@ -115,10 +90,175 @@ EOF
   fi
 }
 
-# ─── compile ──────────────────────────────────────────────────────
+# ─── socket IPC ───────────────────────────────────────────────────
+# .haystack/sock  — request FIFO  (ostk writes, haystack reads)
+# .haystack/reply — response FIFO (haystack writes, ostk reads)
+# .haystack/pid   — daemon PID
+#
+# Protocol: line-oriented, one request per line
+#   request:  <command> [args...]
+#   response: STATUS <code>\n<payload>\nEND\n
+
+sock_init() {
+  mkdir -p "${HAYSTACK_DIR}"
+  mkdir -p "${HAYSTACK_DIR}/compile.d"
+
+  # Create FIFOs if they don't exist
+  for f in sock reply; do
+    if [ ! -p "${HAYSTACK_DIR}/${f}" ]; then
+      rm -f "${HAYSTACK_DIR}/${f}"
+      mkfifo "${HAYSTACK_DIR}/${f}"
+    fi
+  done
+}
+
+sock_listen() {
+  sock_init
+
+  # Write PID
+  echo $$ > "${HAYSTACK_DIR}/pid"
+
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  echo "${ts} kernel:listen pid=$$" >> "${OSTK_DIR}/log/events"
+
+  # Read loop — one command per line from sock
+  while true; do
+    if read -r line < "${HAYSTACK_DIR}/sock"; then
+      cmd=$(echo "$line" | awk '{print $1}')
+      args=$(echo "$line" | cut -d' ' -f2- -s)
+
+      case "$cmd" in
+        compile)
+          sock_handle_compile "$args"
+          ;;
+        bench)
+          sock_handle_bench "$args"
+          ;;
+        status)
+          sock_handle_status
+          ;;
+        shutdown)
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          echo "${ts} kernel:shutdown" >> "${OSTK_DIR}/log/events"
+          {
+            echo "STATUS 0"
+            echo "shutdown"
+            echo "END"
+          } > "${HAYSTACK_DIR}/reply"
+          rm -f "${HAYSTACK_DIR}/pid"
+          exit 0
+          ;;
+        *)
+          {
+            echo "STATUS 1"
+            echo "unknown command: ${cmd}"
+            echo "END"
+          } > "${HAYSTACK_DIR}/reply"
+          ;;
+      esac
+    fi
+  done
+}
+
+sock_handle_compile() {
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+  # Verify binding
+  if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
+    {
+      echo "STATUS 1"
+      echo "no kernel binding"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+    return
+  fi
+
+  k_status=$(sed -n 's/^status=//p' "${OSTK_DIR}/state/kernel")
+  if [ "$k_status" != "ACK" ]; then
+    {
+      echo "STATUS 1"
+      echo "kernel NACK"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+    return
+  fi
+
+  # Run compile.d pipeline
+  compile_ok=true
+  compile_out=""
+  if [ -d "${HAYSTACK_DIR}/compile.d" ]; then
+    for stage in "${HAYSTACK_DIR}/compile.d"/*; do
+      [ -f "$stage" ] && [ -x "$stage" ] || continue
+      stage_name=$(basename "$stage")
+      stage_result=$(sh "$stage" 2>&1) || { compile_ok=false; }
+      compile_out="${compile_out}${stage_name}: ${stage_result}
+"
+    done
+  fi
+
+  echo "${ts} kernel:compile stages=$(ls "${HAYSTACK_DIR}/compile.d/" 2>/dev/null | wc -l | tr -d ' ')" \
+    >> "${OSTK_DIR}/log/events"
+
+  if [ "$compile_ok" = true ]; then
+    {
+      echo "STATUS 0"
+      [ -n "$compile_out" ] && printf '%s' "$compile_out"
+      echo "compiled"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+  else
+    {
+      echo "STATUS 1"
+      printf '%s' "$compile_out"
+      echo "compile failed"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+  fi
+}
+
+sock_handle_bench() {
+  if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
+    {
+      echo "STATUS 1"
+      echo "no kernel binding"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+    return
+  fi
+
+  k_status=$(sed -n 's/^status=//p' "${OSTK_DIR}/state/kernel")
+  if [ "$k_status" != "ACK" ]; then
+    {
+      echo "STATUS 1"
+      echo "kernel NACK"
+      echo "END"
+    } > "${HAYSTACK_DIR}/reply"
+    return
+  fi
+
+  {
+    echo "STATUS 0"
+    echo "bench ok"
+    echo "END"
+  } > "${HAYSTACK_DIR}/reply"
+}
+
+sock_handle_status() {
+  {
+    echo "STATUS 0"
+    echo "kernel=haystack ${HAYSTACK_VERSION}"
+    echo "pid=$$"
+    echo "sock=${HAYSTACK_DIR}/sock"
+    if [ -f "${OSTK_DIR}/state/kernel" ]; then
+      cat "${OSTK_DIR}/state/kernel"
+    fi
+    echo "END"
+  } > "${HAYSTACK_DIR}/reply"
+}
+
+# ─── direct-call fallbacks (no socket) ────────────────────────────
 
 kernel_compile() {
-  # Verify kernel binding exists
   if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
     echo "haystack: no kernel binding. negotiate first." >&2
     exit 1
@@ -130,10 +270,18 @@ kernel_compile() {
     exit 1
   fi
 
+  # Run compile.d if present
+  if [ -d "${HAYSTACK_DIR}/compile.d" ]; then
+    for stage in "${HAYSTACK_DIR}/compile.d"/*; do
+      [ -f "$stage" ] && [ -x "$stage" ] || continue
+      stage_name=$(basename "$stage")
+      echo "haystack: compile.d/${stage_name}" >&2
+      sh "$stage" || { echo "haystack: stage ${stage_name} failed" >&2; exit 1; }
+    done
+  fi
+
   exit 0
 }
-
-# ─── bench ────────────────────────────────────────────────────────
 
 kernel_bench() {
   if [ ! -f "${OSTK_DIR}/state/kernel" ]; then
@@ -160,11 +308,14 @@ case "${1:---version}" in
       shift
       kernel_negotiate "${1:-${OSTK_DIR}/state/session}"
     else
+      # Init socket dir on boot
+      sock_init
       exit 0
     fi
     ;;
+  listen)  shift; sock_listen "$@" ;;
   compile) shift; kernel_compile "$@" ;;
   bench)   shift; kernel_bench "$@" ;;
-  help)    echo "boot compile bench" ;;
+  help)    echo "boot listen compile bench" ;;
   *)       exit 1 ;;
 esac
