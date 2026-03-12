@@ -15,74 +15,184 @@ require_kernel() {
     die "kernel not found. run: curl -fsSL https://ostk.ai/install | sh"
 }
 
+require_boot() {
+  [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
+}
+
+# ─── identity resolution ──────────────────────────────────────────
+# Order: GPG → SSH → $OSTK_ENTITY → anonymous
+# Each method sets: entity_id, entity_type, entity_tier, sign_method
+
+resolve_identity() {
+  entity_id="anonymous"
+  entity_type="anonymous"
+  entity_tier="T3"
+  sign_method="none"
+
+  # 1. GPG keyring
+  if command -v gpg >/dev/null 2>&1; then
+    gpg_uid=$(gpg --list-keys --with-colons 2>/dev/null \
+      | awk -F: '/^uid:.*:$/{print $10; exit}') || true
+    if [ -n "$gpg_uid" ]; then
+      entity_id="$gpg_uid"
+      entity_type="gpg"
+      sign_method="gpg"
+      # Check if this key is co-signed by a T0 (in the signing chain)
+      entity_tier="T1"
+      gpg_fpr=$(gpg --list-keys --with-colons "$gpg_uid" 2>/dev/null \
+        | awk -F: '/^fpr/{print $10; exit}') || true
+      if [ -n "$gpg_fpr" ]; then
+        # Check for T0 co-signatures (955AF54E or 99B076C9)
+        sigs=$(gpg --list-sigs --with-colons "$gpg_fpr" 2>/dev/null \
+          | awk -F: '/^sig/{print $5}') || true
+        case "$sigs" in
+          *955AF54E*|*99B076C9*|*42E499C6D4889BFC*)
+            entity_tier="T0"
+            ;;
+        esac
+      fi
+      return 0
+    fi
+  fi
+
+  # 2. SSH signing key (git config)
+  ssh_key=""
+  if command -v git >/dev/null 2>&1; then
+    ssh_key=$(git config user.signingkey 2>/dev/null) || true
+  fi
+  if [ -n "$ssh_key" ]; then
+    # Resolve fingerprint
+    ssh_fp=""
+    if [ -f "$ssh_key" ]; then
+      ssh_fp=$(ssh-keygen -lf "$ssh_key" 2>/dev/null | awk '{print $2}') || true
+    elif echo "$ssh_key" | grep -q "^SHA256:"; then
+      ssh_fp="$ssh_key"
+    fi
+
+    git_name=$(git config user.name 2>/dev/null) || true
+    git_email=$(git config user.email 2>/dev/null) || true
+
+    entity_id="${git_name:-ssh}${git_email:+ <${git_email}>}"
+    entity_type="agent"
+    entity_tier="T1"
+    sign_method="ssh:${ssh_fp:-${ssh_key}}"
+    return 0
+  fi
+
+  # 3. $OSTK_ENTITY override (T2 max)
+  if [ -n "${OSTK_ENTITY:-}" ]; then
+    entity_id="$OSTK_ENTITY"
+    entity_type="alias"
+    entity_tier="T2"
+    sign_method="env"
+    return 0
+  fi
+
+  # 4. Anonymous — defaults already set
+  return 0
+}
+
+# ─── tier enforcement ─────────────────────────────────────────────
+
+get_session_tier() {
+  if [ -f "${OSTK_DIR}/state/session" ]; then
+    sed -n 's/^tier=//p' "${OSTK_DIR}/state/session"
+  else
+    echo "T3"
+  fi
+}
+
+require_tier() {
+  required="$1"
+  current=$(get_session_tier)
+
+  # T0 < T1 < T2 < T3 (lower number = higher privilege)
+  current_n=$(echo "$current" | sed 's/T//')
+  required_n=$(echo "$required" | sed 's/T//')
+
+  if [ "$current_n" -gt "$required_n" ]; then
+    die "tier ${current} insufficient. requires ${required} or higher."
+  fi
+}
+
 # ─── commands ──────────────────────────────────────────────────────
 
 cmd_boot() {
   require_kernel
   info "booting ostk ${VERSION}"
 
-  mkdir -p "${OSTK_DIR}"
-
-  # Initialize state directory
   mkdir -p "${OSTK_DIR}/state"
   mkdir -p "${OSTK_DIR}/log"
   mkdir -p "${OSTK_DIR}/keys"
 
-  # Record boot event
-  local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${ts} boot ${VERSION}" >> "${OSTK_DIR}/log/events"
 
-  # Detect GPG identity
-  local gpg_id="anonymous"
-  if command -v gpg >/dev/null 2>&1; then
-    gpg_id=$(gpg --list-keys --with-colons 2>/dev/null \
-      | awk -F: '/^uid:.*:$/{print $10; exit}') || true
-    [ -z "$gpg_id" ] && gpg_id="anonymous"
-  fi
+  # Negotiate identity
+  resolve_identity
 
   # Write session state
   cat > "${OSTK_DIR}/state/session" <<EOF
 version=${VERSION}
 booted=${ts}
-identity=${gpg_id}
+identity=${entity_id}
+type=${entity_type}
+tier=${entity_tier}
+sign=${sign_method}
 kernel=$(${KERNEL} --version 2>/dev/null || echo "unknown")
 EOF
+
+  echo "${ts} negotiate tier=${entity_tier} type=${entity_type} sign=${sign_method}" \
+    >> "${OSTK_DIR}/log/events"
 
   # Delegate to kernel boot if it supports it
   if "$KERNEL" help 2>/dev/null | grep -q "boot"; then
     "$KERNEL" boot "$@"
   fi
 
-  info "booted. identity: ${gpg_id}"
+  info "identity: ${entity_id}"
+  info "type: ${entity_type} | tier: ${entity_tier} | sign: ${sign_method}"
   info "state: ${OSTK_DIR}/state/session"
+}
+
+cmd_identity() {
+  require_boot
+
+  if [ "${1:-}" = "--resolve" ]; then
+    # Re-resolve without rebooting (read-only, does not change session)
+    resolve_identity
+    echo "identity=${entity_id}"
+    echo "type=${entity_type}"
+    echo "tier=${entity_tier}"
+    echo "sign=${sign_method}"
+    echo "bound=false"
+  else
+    # Show bound session identity
+    cat "${OSTK_DIR}/state/session"
+  fi
 }
 
 cmd_compile() {
   require_kernel
+  require_boot
+  require_tier "T1"
   info "compiling..."
 
-  [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
-
-  local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${ts} compile" >> "${OSTK_DIR}/log/events"
 
-  # Delegate to kernel
   "$KERNEL" compile "$@"
 }
 
 cmd_bench() {
   require_kernel
+  require_boot
+  require_tier "T1"
   info "benchmarking..."
 
-  [ -f "${OSTK_DIR}/state/session" ] || die "not booted. run: ostk boot"
-
-  local ts
   ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   echo "${ts} bench" >> "${OSTK_DIR}/log/events"
 
-  # Delegate to kernel
   "$KERNEL" bench "$@"
 }
 
@@ -108,15 +218,23 @@ ostk ${VERSION} — your os + tack
 usage: ostk <command> [args]
 
 commands:
-  boot       Initialize the OS and establish identity
-  compile    Compile and verify state
-  bench      Run benchmarks
+  boot       Initialize the OS and negotiate identity
+  identity   Show session identity (--resolve for live check)
+  compile    Compile and verify state (T1+)
+  bench      Run benchmarks (T1+)
   status     Show current session state
   version    Print version info
   help       Show this help
 
+trust tiers:
+  T0  Ratified       GPG co-signed by T0     write+govern
+  T1  Authenticated  GPG or SSH key           write
+  T2  Aliased        Named, no crypto         read-only
+  T3  Anonymous      No identity              no access
+
 environment:
-  OSTK_DIR   State directory (default: ~/.ostk)
+  OSTK_DIR       State directory (default: ~/.ostk)
+  OSTK_ENTITY    Override identity name (T2 max)
 EOF
 }
 
@@ -124,6 +242,7 @@ EOF
 
 case "${1:-help}" in
   boot)    shift; cmd_boot "$@" ;;
+  identity) shift; cmd_identity "$@" ;;
   compile) shift; cmd_compile "$@" ;;
   bench)   shift; cmd_bench "$@" ;;
   status)  shift; cmd_status "$@" ;;
