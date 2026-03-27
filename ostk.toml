@@ -1,0 +1,47 @@
+# ostk.toml — official v2.2 release configuration
+# os-tack/ostk.ai — public release repository
+
+[version]
+release = "2.2.0"
+kernel = "v2.1.0"
+released_at = "2026-03-27T20:00:00Z"
+
+[identity]
+name = "@ostk.ai.prime"
+fingerprint = "955AF54E6D5E8F4A2B3C7D9E1F0A2B3C"
+signed_by = "@haystack.prime"
+
+[authorization]
+# Beta phase: GitHub organization members can install
+github_org = "os-tack"
+github_team = "core-contributors"
+gpg_verification = true
+
+[beta]
+enabled = true
+max_users = 100
+signup_url = "https://ostk.ai/beta"
+contact = "founding@os-tack.ai"
+
+[distribution]
+mirrors = [
+  "https://github.com/os-tack/ostk.ai/releases",
+  "https://ostk.ai/releases"
+]
+verify_signature = true
+
+[kernel]
+boot_mode = "embedded-first"
+daemon_lifecycle = "tui-owned"
+laws = [
+  "invisible-write",
+  "ephemeral",
+  "filesystem",
+  "OCC"
+]
+
+[features]
+tui = true
+agents = true
+audit = true
+digest = true
