@@ -1,0 +1,73 @@
+name: Pack governance bail
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v2.2.2)'
+        required: true
+
+jobs:
+  bail:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Import signing key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+
+      - name: Pack bail
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          BAIL_NAME="governance-${VERSION}.bail"
+
+          mkdir -p governance
+
+          # Governance templates — HUMANFILE is the template, not ostk.ai's identity
+          for f in bail/HUMANFILE Agentfile ostk.toml pin.caps; do
+            if [ -f "$f" ]; then
+              cp "$f" governance/
+              echo "  + $(basename $f)"
+            fi
+          done
+
+          # Build manifest
+          cat > governance/manifest.json << EOF
+          {
+            "version": "${VERSION}",
+            "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "signer": "@ostk.ai",
+            "mode": "public",
+            "files": ["HUMANFILE", "Agentfile", "ostk.toml", "pin.caps", "manifest.json"]
+          }
+          EOF
+
+          # Sign manifest
+          gpg --batch --yes --passphrase "${{ secrets.GPG_PASSPHRASE }}" \
+            --pinentry-mode loopback \
+            --local-user "${{ secrets.GPG_KEY_ID }}" \
+            --detach-sign --armor governance/manifest.json
+
+          tar -czf "${BAIL_NAME}" governance/
+          echo "bail_name=${BAIL_NAME}" >> "$GITHUB_ENV"
+
+      - name: Attach bail to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          gh release upload "${VERSION}" "${bail_name}" --clobber

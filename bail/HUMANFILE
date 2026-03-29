@@ -1,0 +1,19 @@
+# HUMANFILE — @{USERNAME} ({OPERATOR})
+#
+# Your identity, secrets, and autonomy grants.
+# Created by ostk init from os-tack/ostk.ai governance bail.
+#
+# Docs: https://ostk.ai/docs/humanfile
+
+IDENTITY {USERNAME}
+SIGN {GPG_KEY}
+
+MODEL claude-sonnet-4-5
+
+SECRET <<KEYS
+ANTHROPIC_API_KEY
+KEYS
+
+DRIVER fcp-rust
+DRIVER fcp-screen
+DRIVER fcp-web

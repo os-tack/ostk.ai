@@ -1,0 +1,12 @@
+# Agentfile — default scheduler agent
+# This is the reference Agentfile shipped by os-tack/ostk.ai.
+# ostk init derives project-local Agentfiles from this.
+
+FROM auto
+PROMPT "You are the scheduling intelligence for this project."
+TOOL shell
+TOOL file:read
+TOOL file:edit
+LIMIT tokens 200000
+BOOT ostk boot
+PIN default

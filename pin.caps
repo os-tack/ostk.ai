@@ -1,0 +1,8 @@
+# Default capability pins — shipped by os-tack/ostk.ai
+# These define the baseline restrictions for the default agent pin.
+# Trust tier enforcement (T0-T3) applies as a floor on top of these.
+
+read: .ostk/ .language
+write: .ostk/store/default/
+execute: shell(readonly)
+deny: write-kernel modify-governance
