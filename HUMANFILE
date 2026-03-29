@@ -1,0 +1,124 @@
+# HUMANFILE — @ostk.ai v2.2.1
+#
+# This is the OS's governance document. It ships as the default
+# reference for os-tack/ostk.ai. When you run `ostk install`,
+# the onboarding ceremony creates YOUR HUMANFILE with your identity.
+#
+# Format: uppercase directives, # comments, <<TAG heredocs.
+# Docs: https://ostk.ai/docs/humanfile
+
+IDENTITY ostk.ai
+SIGN 6C31536F3DC1BD4780E87B7780DD42208FE25413
+
+# ── Trust Tiers (→895) ────────────────────────────────────────────────────
+#
+# Trust is determined by GPG web of trust, not by platform accounts.
+# Your tier is resolved at boot from cross-signatures in your keyring.
+#
+#   T0 — Dual-signed (human + kernel). Full governance. No restrictions.
+#         Key is a T0 trust anchor OR cross-signed by root.
+#   T1 — Key cross-signed by a T0 holder. Write access to src.
+#         OS files protected (deny: write-kernel modify-governance).
+#   T2 — GPG key present, NOT cross-signed. Read-only.
+#         (deny: write-kernel modify-governance write-src).
+#   T3 — No GPG key. Anonymous. Cannot boot. Public artifacts only.
+#
+# Escalation path: T3 → get a GPG key → T2 → get cross-signed by T0 → T1
+# To get cross-signed: share your fingerprint with a T0 holder.
+# They sign your key: gpg --sign-key YOUR_FINGERPRINT
+# You import: gpg --import their-signed-key.asc
+# Now your key carries a T0 signature. Boot again → T1.
+
+# ── Models ────────────────────────────────────────────────────────────────
+#
+# Premiere models — the OS supports these out of the box.
+# The kernel auto-detects provider from model name.
+# Users declare their preferred model in their project HUMANFILE.
+
+MODEL claude-sonnet-4-5
+FALLBACK claude-haiku-4-5
+
+AVAILABLE <<MODELS
+claude-sonnet-4-5
+claude-opus-4-6
+claude-haiku-4-5
+gemini-2.5-pro
+gemini-3.1-pro
+mistral-large-latest
+codestral-latest
+MODELS
+
+# ── Secrets ───────────────────────────────────────────────────────────────
+#
+# Keys never enter LLM context. The kernel resolves secrets in order:
+#
+#   1. ostk secret store    — `ostk secret set KEY` stores in platform keychain
+#                              (macOS Keychain / Linux secret-tool)
+#   2. BYO secret manager   — set OSTK_SECRET_CMD to your tool (bw, op, pass)
+#   3. Environment variable — fallback to $KEY in your shell env
+#
+# To add a key:    ostk secret set ANTHROPIC_API_KEY
+# To check status: ostk secret list
+#
+# You only need the key(s) for your chosen provider:
+#   - claude-*     → ANTHROPIC_API_KEY
+#   - gemini-*     → GEMINI_API_KEY (or GOOGLE_API_KEY)
+#   - mistral-*    → MISTRAL_API_KEY
+#   - codestral-*  → MISTRAL_API_KEY
+#   - openrouter/* → OPENROUTER_API_KEY
+#   - openai-*     → OPENAI_API_KEY
+
+SECRET <<KEYS
+ANTHROPIC_API_KEY
+GEMINI_API_KEY
+GOOGLE_API_KEY
+MISTRAL_API_KEY
+OPENROUTER_API_KEY
+OPENAI_API_KEY
+KEYS
+
+# ── PIN Policy (→895) ────────────────────────────────────────────────────
+#
+# PINs are capability boundaries. They define what agents CAN'T do.
+# The OS enforces them invisibly at the write path.
+#
+# With v2.2.1, pins are automatic — your trust tier determines your
+# default restrictions. No OSTK_PIN env var needed.
+#
+# Tier-default pins:
+#
+#   T0: no restrictions (full governance)
+#   T1: deny write-kernel modify-governance
+#   T2: deny write-kernel modify-governance write-src
+#   T3: deny all writes (cannot boot)
+#
+# Explicit pins (via `ostk run --pin <name>`) can only ADD restrictions
+# on top of your tier default. The tier is a floor, not an override.
+# A T2 user cannot escape write-src denial via an explicit pin.
+#
+# Custom pins:
+#   ostk pin issue my-agent --caps "read write execute"
+#   # then edit .ostk/pins/my-agent/pin.caps
+#
+# Default deny tokens:
+#
+#   write-kernel         Agents cannot modify .ostk/ (the OS state)
+#   modify-governance    Agents cannot modify HUMANFILE, ENTITYFILE,
+#                        .primefile, GOVERNANCE.md, Agentfile, or
+#                        anything in agents/
+#   write-src            Agents cannot modify files under src/
+
+# ── OS File Protection ────────────────────────────────────────────────────
+#
+# These files are governance-critical. Protected by default pin:
+#
+#   ENTITYFILE       — OS identity declaration
+#   HUMANFILE        — human governance document
+#   GENESIS.md       — birth attestation (immutable history)
+#   AUTHORIZATION.md — trust tier definitions
+#   KEYS             — signing key registry
+#   prime.asc        — root public key
+#   install.sh       — onboarding ceremony (supply chain critical)
+#   ostk.toml        — release configuration
+#
+# To modify these files, a human must act directly.

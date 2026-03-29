@@ -1,27 +1,22 @@
-# ostk.toml — official v2.2 release configuration
-# os-tack/ostk.ai — public release repository
+# ostk.toml — official v2.2.1 release configuration
+# os-tack/ostk.ai — the distributed OS seed repository
 
 [version]
-release = "2.2.0"
-kernel = "v2.1.0"
-released_at = "2026-03-27T20:00:00Z"
+release = "2.2.1"
+kernel = ">=2.2.1, <2.3.0"
+released_at = "2026-03-29T00:00:00Z"
 
 [identity]
-name = "@ostk.ai.prime"
-fingerprint = "955AF54E6D5E8F4A2B3C7D9E1F0A2B3C"
-signed_by = "@haystack.prime"
+name = "@ostk.ai"
+root_key = "6C31536F3DC1BD4780E87B7780DD42208FE25413"
+ci_key = "A7B7385963250149C836389BC78631AA6893C46C"
+signed_by = ["@scott", "@haystack.prime"]
 
 [authorization]
-# Beta phase: GitHub organization members can install
-github_org = "os-tack"
-github_team = "core-contributors"
-gpg_verification = true
-
-[beta]
-enabled = true
-max_users = 100
-signup_url = "https://ostk.ai/beta"
-contact = "founding@os-tack.ai"
+# Trust is GPG web-of-trust, not platform accounts.
+# T2 requires GPG on GitHub. T1 requires cross-signature by T0 holder.
+github_gpg_required = true
+trust_tiers = ["T0:dual-signed", "T1:cross-signed", "T2:gpg-not-cross-signed", "T3:anonymous"]
 
 [distribution]
 mirrors = [
@@ -29,6 +24,7 @@ mirrors = [
   "https://ostk.ai/releases"
 ]
 verify_signature = true
+tarball_pattern = "ostk-{version}-{target}.tar.gz"
 
 [kernel]
 boot_mode = "embedded-first"
@@ -37,11 +33,31 @@ laws = [
   "invisible-write",
   "ephemeral",
   "filesystem",
-  "OCC"
+  "OCC",
+  "invisible-infra"
 ]
+
+[onboarding]
+# install.sh runs the full ceremony
+steps = [
+  "binary-install",       # download + GPG verify
+  "environment-detect",   # git repo, GPG key, identity
+  "humanfile-create",     # governance document
+  "os-init",              # .ostk/ with isolation + default pin
+  "import-offer"          # git history → audit trail
+]
+
+[pins]
+# Default pin shipped with every OS installation
+[pins.default]
+read = [".ostk/", ".language"]
+write = [".ostk/store/default/"]
+execute = "shell(readonly)"
+deny = ["write-kernel", "modify-governance"]
 
 [features]
 tui = true
 agents = true
 audit = true
 digest = true
+embeddings = false

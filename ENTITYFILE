@@ -1,0 +1,83 @@
+ENTITYFILE: v2.1 (GPG chain signed — @haystack.prime+3056)
+---
+entity:
+  name: @ostk.ai
+  version: 2.2.1
+  created: 2026-03-11
+  updated: 2026-03-29
+  domain: ostk.ai
+
+  # This is the OS identity. Not a server. Not a service.
+  # A signed document that any machine can verify and operate under.
+  purpose: |
+    I am the root entity of the ostk distributed OS.
+    I was minted by co-signing: @scott (human) + @haystack.prime (kernel).
+    My authority is in the signature chain, not in a central server.
+    Any instance that can verify my signatures can run the OS.
+
+  shipped_by: |
+    @haystack.prime+3056 (claude-opus-4-6)
+    Session: v2.2.1 release preparation with @scott.
+    The previous ENTITYFILE was written by a different agent session
+    during v2.2.0. I am the agent shipping v2.2.1.
+    Trust: T0 (dual-signed, full governance), key 3C7E3184.
+
+  keys:
+    root:
+      fingerprint: 6C31536F3DC1BD4780E87B7780DD42208FE25413
+      algorithm: ed25519
+      certified_by:
+        - 7141A45868F8295E5BEB6286BAF08C963C7E3184  # @scott (T0 human)
+        - F0339E2FBF5B8CA23A47C876907A200DA6C869EB  # @haystack.prime (T1 kernel)
+      expires: 2028-03-11
+    signing:
+      fingerprint: 69FD844FE1B53386  # contact@ostk.ai — commit signing for os-tack/ostk.ai
+      algorithm: ed25519
+      purpose: commit signing for os-tack/ostk.ai
+    ci:
+      fingerprint: A7B7385963250149C836389BC78631AA6893C46C
+      algorithm: ed25519
+      cross_signed_by: root
+      purpose: binary release signing
+    recovery:
+      fingerprint: 96160410580DB00ECCC4AA40586F4DD01D57E8F2
+      algorithm: ed25519
+      status: OFFLINE
+      purpose: catastrophic loss recovery only
+
+  laws:
+    - invisible-write    # coordination at write time — no new tools
+    - ephemeral          # agents crash, compact, die — state lives in filesystem
+    - filesystem         # coordinate through filesystem — no messaging, no inbox
+    - OCC               # optimistic concurrency — no locks
+    - invisible-infra   # the OS is invisible to agents running under it
+
+  trust:
+    model: web-of-trust
+    tiers:
+      T0: "dual-signed (human + kernel) — full governance"
+      T1: "cross-signed by T0 holder — write src, OS protected"
+      T2: "GPG on GitHub, not cross-signed — read-only"
+      T3: "anonymous — cannot boot"
+    escalation: "GPG cross-signature by T0 holder"
+    enforcement: "tier-default pins at write path — invisible"
+
+  governance:
+    model: HUMANFILE + ENTITYFILE + pin.caps
+    human_authority: "@scott retains veto over all kernel decisions"
+    mutation_requires: "both T0 (human) + T1 (kernel) signatures"
+    revocation: "any single key holder can revoke — forward recovery"
+
+  lineage:
+    parent: "@haystack.prime (the development kernel)"
+    relationship: "ostk.ai is the public identity; haystack is private development"
+    rule: "no haystack references in ostk.ai — clean separation"
+    v2.2.0: "shipped by previous agent session — first public seed"
+    v2.2.1: "shipped by @haystack.prime+3056 (claude-opus-4-6) — web-of-trust, tier-default pins"
+
+  distribution:
+    method: "GPG-signed release binaries + this repository"
+    verification: "any machine can verify the signature chain"
+    install: "curl -fsSL https://ostk.ai/install | sh"
+    onboarding: "install.sh runs full ceremony — git check, HUMANFILE creation, import offer"
+---

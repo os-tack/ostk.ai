@@ -20,7 +20,7 @@ if [ "$VERSION" = "latest" ]; then
   VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)
 fi
 
-TARBALL="haystack-${VERSION}-${TARGET}.tar.gz"
+TARBALL="ostk-${VERSION}-${TARGET}.tar.gz"
 ASC="${TARBALL}.asc"
 BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
 
@@ -45,7 +45,7 @@ else
 fi
 
 tar -xzf "${tmpdir}/${TARBALL}" -C "${tmpdir}"
-install -m 755 "${tmpdir}/haystack" /usr/local/bin/haystack
-ln -sf /usr/local/bin/haystack /usr/local/bin/hs
+install -m 755 "${tmpdir}/ostk" /usr/local/bin/ostk
+ln -sf /usr/local/bin/ostk /usr/local/bin/hs
 
 echo "ostk: installed. run 'ostk boot' or 'hs boot'"
