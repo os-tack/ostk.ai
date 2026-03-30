@@ -1,10 +1,10 @@
-# ostk.toml — official v2.2.1 release configuration
+# ostk.toml — official v2.2.3 release configuration
 # os-tack/ostk.ai — the distributed OS seed repository
 
 [version]
-release = "2.2.2"
-kernel = ">=2.2.2, <2.3.0"
-released_at = "2026-03-29T00:00:00Z"
+release = "2.2.3"
+kernel = ">=2.2.3, <2.3.0"
+released_at = "2026-03-30T00:00:00Z"
 
 [identity]
 name = "@ostk.ai"

@@ -84,7 +84,7 @@ Every release is GPG signed. The signing key is in [`KEYS`](KEYS) and [`prime.as
 
 ```bash
 gpg --import prime.asc
-gpg --verify ostk-v2.2.0-aarch64-apple-darwin.tar.gz.asc
+gpg --verify ostk-v2.2.3-aarch64-apple-darwin.tar.gz.asc
 ```
 
 ## Authorize
