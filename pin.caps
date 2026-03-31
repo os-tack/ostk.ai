@@ -3,6 +3,6 @@
 # Trust tier enforcement (T0-T3) applies as a floor on top of these.
 
 read: .ostk/ .language
-write: .ostk/store/default/
+write: .ostk/store/default/ .ostk/needles/ .ostk/hay/
 execute: shell(readonly)
 deny: write-kernel modify-governance
