@@ -185,8 +185,8 @@ ostk pin issue NAME            # create a capability boundary
 
 ## Architecture
 
-- **Spec**: [ostk v1 — the unified foundation](docs/spec/ostk-v1-the-unified-foundation-kernel-cpus-memory-network-trust-boot-and-the-running-system.md)
-- **Session topology**: [session-topology.md](docs/spec/session-topology.md)
+- **Kernel specification**: [ostk.ai/docs/kernel-spec](https://ostk.ai/docs/kernel-spec) — seven primitives, Five Laws, memory hierarchy, dual-CPU scheduler
+- **Session topology**: [ostk.ai/docs/session-topology](https://ostk.ai/docs/session-topology) — anchors, lineages, drain snapshots, crash recovery, sub-stacks
 - **Test suite**: 2997 tests, 0 failures
 
 ## License
