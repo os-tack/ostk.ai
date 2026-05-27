@@ -1,32 +1,19 @@
-# ostk.toml — official v2.2.3 release configuration
-# os-tack/ostk.ai — the distributed OS seed repository
+# ostk.toml — default project configuration shipped in the governance bail.
+# `ostk init` writes a copy of this into each new project.
+#
+# Identity, trust roots, distribution mirrors, and the onboarding ceremony
+# live in the bail's manifest.json + .primefile — NOT here. This file is
+# per-project: what kernel does this project want, which pin is default,
+# which features are on.
 
-[version]
-release = "2.2.3"
-kernel = ">=2.2.3, <2.3.0"
-released_at = "2026-03-30T00:00:00Z"
-
-[identity]
-name = "@ostk.ai"
-root_key = "6C31536F3DC1BD4780E87B7780DD42208FE25413"
-ci_key = "A7B7385963250149C836389BC78631AA6893C46C"
-signed_by = ["@scott", "@haystack.prime"]
-
-[authorization]
-# Trust is GPG web-of-trust, not platform accounts.
-# T2 requires GPG on GitHub. T1 requires cross-signature by T0 holder.
-github_gpg_required = true
-trust_tiers = ["T0:dual-signed", "T1:cross-signed", "T2:gpg-not-cross-signed", "T3:anonymous"]
-
-[distribution]
-mirrors = [
-  "https://github.com/os-tack/ostk.ai/releases",
-  "https://ostk.ai/releases"
-]
-verify_signature = true
-tarball_pattern = "ostk-{version}-{target}.tar.gz"
+[project]
+name = "{PROJECT_NAME}"
 
 [kernel]
+# Lower bound is the release that pack-bail.yml ran against.
+# pack-bail.yml rewrites this line on every release; agents should not
+# hand-edit it.
+version = ">=7.0.0"
 boot_mode = "embedded-first"
 daemon_lifecycle = "tui-owned"
 laws = [
@@ -34,26 +21,17 @@ laws = [
   "ephemeral",
   "filesystem",
   "OCC",
-  "invisible-infra"
+  "invisible-infra",
 ]
 
-[onboarding]
-# install.sh runs the full ceremony
-steps = [
-  "binary-install",       # download + GPG verify
-  "environment-detect",   # git repo, GPG key, identity
-  "humanfile-create",     # governance document
-  "os-init",              # .ostk/ with isolation + default pin
-  "import-offer"          # git history → audit trail
-]
-
-[pins]
-# Default pin shipped with every OS installation
 [pins.default]
-read = [".ostk/", ".language"]
-write = [".ostk/store/default/"]
-execute = "shell(readonly)"
-deny = ["write-kernel", "modify-governance"]
+# Default capability pin. The full grammar lives in .ostk/pins/default/pin.caps
+# — these fields are a SUMMARY for `ostk show config`. Edit pin.caps for
+# semantic changes; this block is informational.
+read = [".", "~/.claude/projects/", "~/.cache/", "/tmp/"]
+write = [".ostk/", "~/.cache/ostk/", "/tmp/", "/workspace/"]
+execute = "shell(governed)"
+deny = ["write-kernel", "modify-governance", "write-secret"]
 
 [features]
 tui = true

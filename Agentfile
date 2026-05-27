@@ -1,12 +1,34 @@
-# Agentfile — default scheduler agent
-# This is the reference Agentfile shipped by os-tack/ostk.ai.
-# ostk init derives project-local Agentfiles from this.
+# Agentfile — default scheduler agent shipped by the v7.0.0 governance bail.
+# `ostk init` derives the project's root Agentfile from this template.
+#
+# Grammar: https://ostk.ai/docs/agentfile
 
 FROM auto
-PROMPT "You are the scheduling intelligence for this project."
+MODEL claude-sonnet-4-6
+
+# STRICT enforces that every TOOL listed below is a known canonical name
+# (lowercased, ABI-registered). Without STRICT, unknown TOOL lines are
+# silently ignored — useful for forward compat but hides typos.
+STRICT
+
+PROMPT "You are the scheduling intelligence for this ostk project. The kernel exposes a verb surface via `ostk boot`. Treat the substrate (decisions.jsonl, needles/, journal.jsonl) as the source of truth for project state. Communicate in tack — short, structured, decisive."
+
+# Core tools — file + shell + web + task orchestration + retrieval.
 TOOL shell
 TOOL file:read
 TOOL file:edit
-LIMIT tokens 200000
+TOOL web
+TOOL task
+TOOL recall
+
+LIMIT tokens 1000000
+LIMIT permissions governed
+
 BOOT ostk boot
 PIN default
+SKILL boot
+
+# Beta features — opt-in capabilities that ship enabled by default for v7.
+# Disable by removing the line.
+BETA context-management
+BETA extended-cache-ttl
