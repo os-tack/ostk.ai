@@ -2,7 +2,7 @@
 
 **your os + tack** — a local-first operating system for AI agents.
 
-ostk is a kernel that lives in your project's `.ostk/` directory. It coordinates AI agents through the filesystem instead of through messages, locks, or services. Every write is tracked. Every decision is signed. The agents don't know any of this is happening. That's the design.
+ostk is a kernel that lives in your project's `.ostk/` directory. It coordinates AI agents through the filesystem instead of through messages, locks, or services. Every write is journaled; the journal is sealed per epoch with DSSE envelopes. The agents don't know any of this is happening. That's the design.
 
 ## Install
 
@@ -45,11 +45,12 @@ After `ostk init && ostk boot`:
 
 ```bash
 ostk help                              # full verb surface
-ostk work capture "fix the auth flow"  # add an idea to the queue
-ostk work triage                       # promote, dedupe, prioritize
-ostk work pull --peek                  # next item to tackle
-ostk work show '→1612' --variants      # explore the neighborhood
-ostk recall "embedding store"          # retrieve over local corpus
+ostk work capture "fix the auth flow"  # add an idea to the pile
+ostk work triage                       # turn captures into needles
+ostk work pull --peek                  # next needle to tackle
+ostk work show '→1612' --depends       # explore needle + its graph
+ostk recall '→1612'                    # fetch a substrate record by address
+ostk recall_search "embedding store"   # free-text search across substrate
 ostk shutdown                          # clean kernel exit
 ```
 
@@ -65,18 +66,16 @@ When you `curl … | sh` and then `ostk init && ostk boot`, this is what shows u
 
 **The kernel.** A POSIX-resident daemon you boot once per project. It holds the anchor lock, owns the audit log, runs the scheduler, and serves a verb surface to clients (the TUI, MCP servers, CLI invocations). It's a single daemon per project root — open the TUI in two terminals and they attach to the same kernel. When the daemon crashes, the next boot replays `audit.jsonl` and resurrects the fleet from drain snapshots; there's no consensus protocol, no quorum, no service mesh.
 
-**A verb surface.** Around 60 stable verbs that you (and agents) call. The surface splits into two classes. Class-1 is the frozen ABI — `boot`, `verify`, `init`, `compile`, `load` — these are spec'd and won't change shape. Class-2 is the operator overlay — `ostk work capture`, `ostk work triage`, `ostk work show --variants`, `ostk recall`, `ostk recovery.seal`, `ostk shutdown` — composable, named after intent, free to evolve. `ostk help` walks the tree.
+**A verb surface.** 135 verbs in the canonical CLI table (`src/kernel/cli_surface.rs`), split into classes. **Class 1** is the agent-callable System ABI — 27 core-resident verbs (`bash`, `fs_ops`, `dispatch`, `context_evict`, `context_load`, `context_pin`, `context_store`, `recall`, `recall_search`, `help`, ...) frozen with `abi_hash` parity to `crates/ostk-abi/src/verbs.rs`; shape changes force an ABI semver bump. **Class 2 Lifecycle** is daemon control (`boot`, `init`, `shutdown`, `tui`). **Class 2 SystemUtility** is the operator overlay — 22 flat verbs (`show`, `trace`, `decide`, `commit`, `inspect`, `ps`, `kill`, `attach`, `bail`, `profile`, `secret`, `grant`, ...). **Class 3 Namespaces** are 7 parents (`work`, `trust`, `recovery`, `fleet`, `agentfile`, `vfs`, `serve`) with members like `work.capture`, `work.triage`, `work.pull`, `work.show`, `recovery.seal`. `ostk help` walks the tree.
 
-**Four built-in drivers.** Each is a context-aware capability provider that registers at boot and exposes services to agents.
+**Drivers.** Capability providers the kernel routes calls to. Two kinds:
 
-- **`fcp-rust`** — Rust-aware code chunker and search. Knows function/struct boundaries, doesn't split symbols across chunks.
-- **`fcp-screen`** — TUI display driver. Multi-pane, mouse-aware, renders the fleet status and agent transcripts.
-- **`fcp-web`** — Web fetch with readability extraction. Strips chrome, returns clean text suitable for an LLM context window.
-- **`fcp-recall`** — Hybrid dense + BM25 retrieval over your local corpus (Claude Code transcripts, your source tree, your decisions log). The `recall` MCP tool agents see is backed by this.
+- **Internal drivers** are compiled into the ostk binary. Today these are `fcp-screen` (TUI display) and `fcp-web` (fetch + readability). They register unconditionally at boot — no HUMANFILE entry needed.
+- **External drivers** are subprocesses speaking the fcp JSON-RPC protocol over stdio. They're declared in HUMANFILE as `DRIVER <name>`; the kernel demand-spawns them on first use via `driver_manager::need_driver()` and tracks `<name>.lock` + `<name>.log` artifacts under `.ostk/drivers/`. The default set in the bail HUMANFILE is `fcp-rust` (Rust-aware code chunker), `fcp-recall` (the daemonized recall surface — hybrid dense + BM25 retrieval over your local corpus, transcripts, code, decisions log).
 
-Drop a Rust crate that implements the driver ABI into `.ostk/drivers/`; the kernel picks it up on next boot.
+To wire a new external driver, build an executable that speaks fcp JSON-RPC, then add it via HUMANFILE: `DRIVER my-driver` plus a kernel-known transport + command mapping (see the `DriverDecl` registry in `src/commands/boot/drivers.rs`). The kernel does **not** scan `.ostk/drivers/` for code — that directory holds only runtime artifacts.
 
-**A filesystem view of OS state.** Mount `/ostk/` (FUSE on macOS Apple Silicon with the `-fuse` build, FUSE on Linux) and you can `cat`, `ls`, `grep`, `find` over the kernel's state.
+**A filesystem view of OS state.** Mount `/ostk/` (FUSE on macOS Apple Silicon with the `-fuse` build; Linux requires a from-source build with `--features fuse`) and you can `cat`, `ls`, `grep`, `find` over the kernel's state.
 
 - `/ostk/proc/<alias>/stat` — live agent metadata, like `/proc` on Linux.
 - `/ostk/needles/<id>/body` — work-item bodies, addressable by needle ID (`→1612`).
@@ -110,9 +109,7 @@ Everything is jq-queryable. Registries are memoized projections; daemon dies →
 
 Mid-flight, the scheduler's tick loop detects crashed workers via heartbeat and hot-rehydrates them without a full daemon restart.
 
-**Sub-stacks (optional).** Isolated blast-radius scopes for multi-worker tasks. Each sub-stack gets its own audit log, drain directory, inbox, and token budget. Overrun the budget → the kernel force-seals the sub-stack. The anchor (parent) keeps running, unaffected.
-
-**Cross-platform binaries.** macOS aarch64 (Apple Silicon, codesigned + Apple-notarized), macOS aarch64 with FUSE for mount support, Linux x86_64 and aarch64 in both glibc 2.31 and musl flavors, Windows x86_64. Each tarball is GPG-signed and ships an OAE.V4 BuildProvenance attestation. The Homebrew tap (`os-tack/homebrew-ostk`) is auto-updated on release.
+**Cross-platform binaries.** macOS aarch64 (Apple Silicon, codesigned + Apple-notarized) ships in two variants — the default build, and a `-fuse` build that links macFUSE for mount support. Linux x86_64 and aarch64 ship in both glibc 2.31 and musl flavors, built without FUSE (build from source with `--features fuse` if you want the mount layer on Linux). Windows x86_64. Each tarball is GPG-signed and ships an OAE.V4 BuildProvenance attestation. The Homebrew tap (`os-tack/homebrew-ostk`) is auto-updated on release.
 
 ## HUMANFILE
 
@@ -174,7 +171,7 @@ gpg --verify ostk-7.0.0-aarch64-apple-darwin.tar.gz.asc
 shasum -a 256 -c ostk-7.0.0-aarch64-apple-darwin.tar.gz.sha256
 ```
 
-For OAE.V4 attestation verification: `ostk verify <artifact>.oae.json`.
+Each release also publishes an `.oae.json` BuildProvenance envelope alongside the tarball; the envelope is signed by the T1-CI Ed25519 key declared in `.primefile §KEYS T1 CI`. Consumer-side OAE verification lives in `recovery.repair` (rebuild from envelopes) and `trust.attestation` (telemetry); a dedicated `ostk verify` operator verb is not in v7's CLI surface.
 
 ## The bail
 
