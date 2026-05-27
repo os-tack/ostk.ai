@@ -110,4 +110,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.tag }}"
-          gh release upload "${VERSION}" "${bail_name}" --clobber
+          # Explicit --repo: the workflow no longer checks out ostk.ai
+          # itself (only haystack's templates subtree to ./haystack), so
+          # gh can't infer the repo from cwd.
+          gh release upload "${VERSION}" "${bail_name}" --clobber \
+            --repo ${{ github.repository }}
