@@ -1,13 +1,25 @@
 name: Pack governance bail
 
+# Builds governance-VERSION.bail by fetching the canonical templates from
+# os-tack/haystack at the matching tag, substituting {KERNEL_VERSION_PIN},
+# signing the manifest, and uploading as a release asset.
+#
+# Single source of truth: templates live in haystack/templates/governance/.
+# This repo no longer carries its own copies; the drift sentinel test in
+# haystack (tests/init_template_drift.rs) pins the contract.
+
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag (e.g. v2.2.2)'
+        description: 'Version tag to pack the bail for (e.g. v7.0.0)'
         required: true
+      source_ref:
+        description: 'Haystack git ref to fetch templates from (default: same as version; pass `main` to re-pack an old release with current templates)'
+        required: false
+        default: ''
 
 jobs:
   bail:
@@ -15,16 +27,31 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Determine version
+      - name: Determine version + source ref
         id: version
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
-            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ github.event.inputs.version }}"
           else
-            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ github.event.release.tag_name }}"
           fi
+          SOURCE="${{ github.event.inputs.source_ref }}"
+          if [ -z "$SOURCE" ]; then
+            SOURCE="$TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$SOURCE" >> "$GITHUB_OUTPUT"
+          echo "version_no_v=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout haystack templates
+        uses: actions/checkout@v4
+        with:
+          repository: os-tack/haystack
+          ref: ${{ steps.version.outputs.source_ref }}
+          path: haystack
+          sparse-checkout: |
+            templates/governance
+          sparse-checkout-cone-mode: false
 
       - name: Import signing key
         run: |
@@ -33,17 +60,25 @@ jobs:
       - name: Pack bail
         run: |
           VERSION="${{ steps.version.outputs.tag }}"
+          VERSION_NO_V="${{ steps.version.outputs.version_no_v }}"
           BAIL_NAME="governance-${VERSION}.bail"
 
           mkdir -p governance
 
-          # Governance templates — HUMANFILE is the template, not ostk.ai's identity
-          for f in bail/HUMANFILE Agentfile ostk.toml pin.caps; do
-            if [ -f "$f" ]; then
-              cp "$f" governance/
-              echo "  + $(basename $f)"
-            fi
-          done
+          # Copy templates verbatim — placeholders that the consumer's
+          # ostk init substitutes ({USERNAME}, {SIGN_LINE}, {OPERATOR},
+          # {PROJECT_NAME}) stay intact.
+          cp haystack/templates/governance/HUMANFILE governance/
+          cp haystack/templates/governance/Agentfile governance/
+          cp haystack/templates/governance/pin.caps  governance/
+
+          # ostk.toml: substitute {KERNEL_VERSION_PIN} to pin the bail to
+          # its release tag. Project-name placeholder stays in for init.
+          sed "s|{KERNEL_VERSION_PIN}|>=${VERSION_NO_V}|g" \
+            haystack/templates/governance/ostk.toml > governance/ostk.toml
+
+          echo "  + bail contents from haystack@${{ steps.version.outputs.source_ref }}"
+          ls -la governance/
 
           # Build manifest
           cat > governance/manifest.json << EOF
@@ -52,6 +87,7 @@ jobs:
             "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "signer": "@ostk.ai",
             "mode": "public",
+            "source_ref": "${{ steps.version.outputs.source_ref }}",
             "files": ["HUMANFILE", "Agentfile", "ostk.toml", "pin.caps", "manifest.json"]
           }
           EOF
