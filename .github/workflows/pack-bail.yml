@@ -49,6 +49,10 @@ jobs:
           repository: os-tack/haystack
           ref: ${{ steps.version.outputs.source_ref }}
           path: haystack
+          # haystack is a private repo; the default GITHUB_TOKEN's scope is
+          # this repo (ostk.ai) only. HAYSTACK_READ_TOKEN must be a
+          # fine-grained PAT with `contents: read` on os-tack/haystack.
+          token: ${{ secrets.HAYSTACK_READ_TOKEN }}
           sparse-checkout: |
             templates/governance
           sparse-checkout-cone-mode: false
